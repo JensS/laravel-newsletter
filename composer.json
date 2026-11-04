@@ -1,0 +1,63 @@
+{
+    "name": "jenss/laravel-newsletter",
+    "description": "Self-hosted newsletters for Laravel: audiences, double opt-in, frozen campaigns, chunked queued sending, delivery tracking and an optional Filament admin. Built for shared hosting.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "laravel",
+        "newsletter",
+        "email",
+        "campaign",
+        "double-opt-in",
+        "filament",
+        "resend",
+        "unsubscribe"
+    ],
+    "authors": [
+        {
+            "name": "Jens Sage",
+            "homepage": "https://www.jenssage.com"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "laravel/framework": "^12.0|^13.0"
+    },
+    "require-dev": {
+        "filament/filament": "^3.3",
+        "orchestra/testbench": "^10.0|^11.0",
+        "phpunit/phpunit": "^11.5|^12.0"
+    },
+    "suggest": {
+        "filament/filament": "Required for the optional admin plugin (^3.3).",
+        "resend/resend-php": "Required for the Resend API driver with idempotency keys."
+    },
+    "autoload": {
+        "psr-4": {
+            "JensS\\Newsletter\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "JensS\\Newsletter\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "JensS\\Newsletter\\NewsletterServiceProvider"
+            ],
+            "aliases": {
+                "Newsletter": "JensS\\Newsletter\\Facades\\Newsletter"
+            }
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
