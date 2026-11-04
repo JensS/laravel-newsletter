@@ -194,6 +194,10 @@ return [
         'middleware' => ['web'],
         'webhook_middleware' => [], // no session/CSRF: one-click unsubscribe, tick and webhooks
         'signup_throttle' => '6,1', // attempts,minutes for public signups
+        // Extra middleware for the public signup endpoint only (POST /subscribe), e.g. your
+        // captcha or spam check: [\Spatie\Honeypot\ProtectAgainstSpam::class] or ['turnstile'].
+        // Runs after the throttle; reject with a validation error or a 4xx response.
+        'signup_middleware' => [],
     ],
 
     /*
@@ -232,6 +236,10 @@ return [
         'require_unsubscribe_link' => true, // refuse to send a template without the unsubscribe URL
         'absolute_urls' => true, // turn relative links/images ("/news") into absolute APP_URL links when freezing
         'max_html_kb' => 95,     // warn above this size: Gmail clips messages larger than ~102 KB
+        // The layout is rendered once per locale when sending starts (its output is frozen
+        // with the campaign). Locales of subscription audiences are detected; list extra
+        // ones here, e.g. for application-provided audiences: ['de', 'en'].
+        'locales' => [],
     ],
 
     'branding' => [

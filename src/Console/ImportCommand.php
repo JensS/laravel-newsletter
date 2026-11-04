@@ -8,11 +8,12 @@ use JensS\Newsletter\Subscriptions\SubscriptionManager;
 class ImportCommand extends Command
 {
     protected $signature = 'newsletter:import
-        {audience : Target subscription audience}
-        {file : CSV file with a header row (email, name, locale, consent_at, confirmed_at, source, ip)}
-        {--source=import : Source recorded for rows without one}';
+        {audience : Target audience}
+        {file : CSV file with a header row (email, status, name, locale, consent_at, confirmed_at, requested_at, unsubscribed_at, source, ip)}
+        {--source=import : Source recorded for rows without one}
+        {--status=subscribed : Status for rows without a status column: subscribed, pending or unsubscribed}';
 
-    protected $description = 'Import existing, already-consented subscribers (keeps original consent timestamps)';
+    protected $description = 'Import subscribers, pending sign-ups and opt-outs, keeping their original consent data';
 
     public function handle(SubscriptionManager $subscriptions): int
     {
@@ -41,10 +42,23 @@ class ImportCommand extends Command
             }
         })();
 
-        $result = $subscriptions->import((string) $this->argument('audience'), $rows, (string) $this->option('source'));
-        fclose($handle);
+        if (SubscriptionManager::importStatus($this->option('status')) === null) {
+            $this->components->error('Unknown --status; use subscribed, pending or unsubscribed.');
 
-        $this->components->info("Imported {$result['imported']}, skipped {$result['skipped']} (invalid or already present).");
+            return self::FAILURE;
+        }
+
+        try {
+            $result = $subscriptions->import((string) $this->argument('audience'), $rows, (string) $this->option('source'), (string) $this->option('status'));
+        } catch (\InvalidArgumentException $e) {
+            $this->components->error($e->getMessage());
+
+            return self::FAILURE;
+        } finally {
+            fclose($handle);
+        }
+
+        $this->components->info("Imported {$result['imported']}, updated {$result['updated']} (opt-outs applied), skipped {$result['skipped']} (invalid, unsupported or already present).");
 
         return self::SUCCESS;
     }

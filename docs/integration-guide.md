@@ -98,7 +98,7 @@ $rows = NewsletterSubscriber::query()->whereNotNull('confirmed_at')->cursor()->m
 Newsletter::subscriptions()->import('newsletter', $rows);
 ```
 
-Or export a CSV and run `php artisan newsletter:import newsletter subscribers.csv`.
+Or export a CSV and run `php artisan newsletter:import newsletter subscribers.csv`. Include unconfirmed sign-ups (`status=pending`) and former subscribers (`status=unsubscribed`) as well, so their history and withdrawals carry over. Pending people are not emailed by the import. Opt-outs from the old weekly recap can be imported into the `weekly-recap` audience with `--status=unsubscribed`.
 
 ### 5. Move drafts and templates
 

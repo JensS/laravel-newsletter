@@ -331,47 +331,128 @@ final class SubscriptionManager
     }
 
     /**
-     * Import existing subscribers, keeping their original consent data.
-     * Rows: email, name?, locale?, consent_at?, source?, ip?
+     * Import existing records, keeping their original consent data.
+     *
+     * Row keys: email, status (subscribed | pending | unsubscribed, default
+     * $defaultStatus), name, locale, source, ip, consent_at, confirmed_at,
+     * requested_at (pending rows), unsubscribed_at.
+     *
+     * - subscribed: active immediately, with the original consent timestamps.
+     * - pending: kept unconfirmed. No confirmation mail is sent; the person gets
+     *   one when they sign up again. Expires under the retention rules, counted
+     *   from requested_at.
+     * - unsubscribed: recorded withdrawal. Also accepted for application-provided
+     *   audiences, where it acts as an opt-out. It overrides an existing
+     *   subscription unless that subscription's consent is newer.
+     *
+     * No events are dispatched for imported rows.
      *
      * @param  iterable<array<string, mixed>>  $rows
-     * @return array{imported: int, skipped: int}
+     * @return array{imported: int, updated: int, skipped: int}
      */
-    public function import(string $audience, iterable $rows, string $source = 'import'): array
+    public function import(string $audience, iterable $rows, string $source = 'import', string $defaultStatus = 'subscribed'): array
     {
         $definition = $this->audiences->get($audience);
 
-        if (! $definition->usesSubscriptions() || $definition->linksMembers()) {
-            throw new InvalidArgumentException("Audience [{$audience}] does not accept imported addresses.");
+        if ($definition->linksMembers()) {
+            throw new InvalidArgumentException("Audience [{$audience}] links members; members opt in themselves and cannot be imported.");
         }
 
-        $imported = $skipped = 0;
+        $imported = $updated = $skipped = 0;
 
         foreach ($rows as $row) {
             $email = isset($row['email']) ? Email::normalize((string) $row['email']) : '';
+            $status = self::importStatus($row['status'] ?? $defaultStatus);
 
-            if (! Email::isValid($email) || $this->findExisting($audience, $email, null)) {
+            try {
+                $dates = [
+                    'consent_at' => self::date($row['consent_at'] ?? null),
+                    'confirmed_at' => self::date($row['confirmed_at'] ?? null),
+                    'requested_at' => self::date($row['requested_at'] ?? null),
+                    'unsubscribed_at' => self::date($row['unsubscribed_at'] ?? null),
+                ];
+            } catch (\Throwable) {
                 $skipped++;
 
                 continue;
             }
 
-            Subscription::query()->create([
+            // Application-owned audiences only store opt-outs.
+            if (! Email::isValid($email) || $status === null || (! $definition->usesSubscriptions() && $status !== SubscriptionStatus::Unsubscribed)) {
+                $skipped++;
+
+                continue;
+            }
+
+            $existing = $this->findExisting($audience, $email, null);
+
+            if ($existing !== null) {
+                $withdrawalIsNewer = $status === SubscriptionStatus::Unsubscribed
+                    && $existing->status !== SubscriptionStatus::Unsubscribed
+                    && ($dates['unsubscribed_at'] === null || $existing->consent_at === null || $dates['unsubscribed_at']->gte($existing->consent_at));
+
+                if (! $withdrawalIsNewer) {
+                    $skipped++;
+
+                    continue;
+                }
+
+                $existing->forceFill([
+                    'status' => SubscriptionStatus::Unsubscribed,
+                    'unsubscribed_at' => $dates['unsubscribed_at'] ?? now(),
+                    'unsubscribe_source' => $row['source'] ?? $source,
+                    'confirmation_token' => null,
+                ])->save();
+                $updated++;
+
+                continue;
+            }
+
+            $attributes = [
                 'audience' => $audience,
                 'email' => $email,
                 'name' => $row['name'] ?? null,
                 'locale' => $row['locale'] ?? null,
-                'status' => SubscriptionStatus::Subscribed,
+                'status' => $status,
                 'source' => $row['source'] ?? $source,
-                'consent_at' => isset($row['consent_at']) ? Carbon::parse($row['consent_at']) : null,
-                'confirmed_at' => isset($row['confirmed_at']) ? Carbon::parse($row['confirmed_at']) : null,
+                'consent_at' => $dates['consent_at'],
+                'confirmed_at' => $dates['confirmed_at'],
                 'consent_ip' => $row['ip'] ?? null,
-            ]);
+            ];
 
+            if ($status === SubscriptionStatus::Unsubscribed) {
+                $attributes['unsubscribed_at'] = $dates['unsubscribed_at'] ?? now();
+                $attributes['unsubscribe_source'] = $row['source'] ?? $source;
+            }
+
+            $subscription = new Subscription($attributes);
+
+            if ($status === SubscriptionStatus::Pending && $dates['requested_at'] !== null) {
+                // Retention for unconfirmed subscriptions counts from the original request.
+                $subscription->created_at = $dates['requested_at'];
+            }
+
+            $subscription->save();
             $imported++;
         }
 
-        return compact('imported', 'skipped');
+        return compact('imported', 'updated', 'skipped');
+    }
+
+    /** Map common export values ("active", "unconfirmed", "opted_out", 1/0 …) to a status. */
+    public static function importStatus(mixed $value): ?SubscriptionStatus
+    {
+        return match (strtolower(trim((string) $value))) {
+            'subscribed', 'confirmed', 'active', 'opted_in', 'optin', '1', 'yes', 'true' => SubscriptionStatus::Subscribed,
+            'pending', 'unconfirmed', 'awaiting_confirmation' => SubscriptionStatus::Pending,
+            'unsubscribed', 'opted_out', 'optout', 'inactive', 'withdrawn', '0', 'no', 'false' => SubscriptionStatus::Unsubscribed,
+            default => null,
+        };
+    }
+
+    private static function date(mixed $value): ?Carbon
+    {
+        return $value === null || $value === '' ? null : Carbon::parse($value);
     }
 
     public function findExisting(string $audience, string $email, ?Model $member): ?Subscription

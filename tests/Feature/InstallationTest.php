@@ -112,7 +112,7 @@ class InstallationTest extends TestCase
         file_put_contents($file, "email,name,consent_at\nimp@example.test,Imp,2022-01-01 10:00:00\nbroken,,\n");
 
         $this->artisan('newsletter:import', ['audience' => 'newsletter', 'file' => $file])
-            ->expectsOutputToContain('Imported 1, skipped 1')
+            ->expectsOutputToContain('Imported 1, updated 0 (opt-outs applied), skipped 1')
             ->assertSuccessful();
 
         unlink($file);

@@ -3,6 +3,9 @@
         php artisan vendor:publish --tag=newsletter-views
     Available: $subject, $previewText, $content (HtmlString), $branding, $unsubscribeUrl,
     $preferencesUrl, $recipient, $data. The unsubscribe link must stay in the output.
+    The layout is rendered once per locale when sending starts and frozen with the
+    campaign: print per-recipient values ($subject, $previewText, $recipient->…, the
+    URLs) unchanged, without transforming them or using them in @if conditions.
 --}}
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}" xmlns="http://www.w3.org/1999/xhtml">

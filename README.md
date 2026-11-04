@@ -191,7 +191,16 @@ Or implement `JensS\Newsletter\Contracts\RecipientProvider` (`page()`, `count()`
 <x-newsletter::subscribe-form audience="newsletter" source="footer" :with-name="true" />
 ```
 
-The form posts to `POST /newsletter/subscribe` (throttled, honeypot-protected). The response is identical whether or not the address already exists, so it cannot be used to enumerate subscribers. JSON requests get a JSON response.
+The form posts to `POST /newsletter/subscribe` (throttled, honeypot-protected). To add your own spam protection (captcha, Turnstile, a honeypot package), register middleware **for this endpoint only**:
+
+```php
+// config/newsletter.php
+'routes' => [
+    'signup_middleware' => [\Spatie\Honeypot\ProtectAgainstSpam::class],   // or ['turnstile'], [MyCaptcha::class.':field']
+],
+```
+
+It runs after the throttle and never applies to confirmation, unsubscribe, preference, tick or webhook routes. Render the widget inside the form's slot: `<x-newsletter::subscribe-form>…</x-newsletter::subscribe-form>`. The response is identical whether or not the address already exists, so it cannot be used to enumerate subscribers. JSON requests get a JSON response.
 
 Programmatically:
 
@@ -221,9 +230,19 @@ Links are HMAC-signed with a key derived from `APP_KEY`, contain no database IDs
 
 ```bash
 php artisan newsletter:import newsletter subscribers.csv --source=legacy
+php artisan newsletter:import newsletter optouts.csv --status=unsubscribed
+php artisan newsletter:import weekly-recap recap-optouts.csv --status=unsubscribed
 ```
 
-The CSV needs an `email` column. Optional columns: `name`, `locale`, `consent_at`, `confirmed_at`, `source`, `ip`. Original consent timestamps are kept. Use `Newsletter::subscriptions()->import()` for programmatic imports.
+The CSV needs an `email` column. Optional columns: `status`, `name`, `locale`, `consent_at`, `confirmed_at`, `requested_at`, `unsubscribed_at`, `source`, `ip`. Rows without a status use `--status` (default `subscribed`). Common export values such as `active`, `unconfirmed`, `opted_out` and `1`/`0` are understood.
+
+| Status | Result |
+| --- | --- |
+| `subscribed` | active, with the original consent timestamps |
+| `pending` | unconfirmed; **no confirmation mail is sent** (they never confirmed, so mailing them would be unsolicited). They get one when they sign up again; the record expires under `retention.unconfirmed_subscriptions_days`, counted from `requested_at`. |
+| `unsubscribed` | recorded withdrawal with `unsubscribed_at`. It overrides an existing subscription unless that subscription's consent is newer. Also accepted for application-provided audiences, where it acts as an opt-out. |
+
+Existing records are never re-activated by an import, and imports dispatch no events. Member-linked audiences cannot be imported because members opt in themselves. For programmatic imports, use `Newsletter::subscriptions()->import($audience, $rows, $source, $defaultStatus)`, which returns `['imported' => …, 'updated' => …, 'skipped' => …]`.
 
 ## Campaigns
 
@@ -252,7 +271,9 @@ Or from the CLI: `php artisan newsletter:send {id|uuid}`.
 
 **Personalization** uses `{{ token }}` and `{{ token|fallback }}`. Values are HTML-escaped. Campaign content is never compiled as Blade, so editors cannot run code. Available tokens: `name`, `first_name`, `email`, `unsubscribe_url`, `preferences_url`, `brand_name`, any key in the campaign's `data`, and any `attributes` your provider adds.
 
-**Freezing:** `start()` renders a validation sample (the layout must contain the unsubscribe link, or sending is refused), then stores the snapshot and switches to `sending` in a single conditional update, so double clicks and concurrent schedulers cannot start a campaign twice. After that, content fields cannot be changed: the model throws a `CampaignException`.
+**Freezing:** `start()` freezes everything a message is made of: content, blocks, sender, branding and **the rendered layout**. The HTML and text layouts are rendered once per locale, with markers where per-recipient values go. Each delivery only fills in those values, so deploying a new template (or deleting one) never changes a campaign that is already sending. Locales come from the audience's subscriptions, `app.locale`, `app.fallback_locale` and `content.locales`. A regional locale without its own translations (`de_AT`) uses its language (`de`), and an unknown locale uses the default.
+
+The snapshot is stored and the campaign switched to `sending` in a single conditional update, so double clicks and concurrent schedulers cannot start a campaign twice. After that, content fields cannot be changed: the model throws a `CampaignException`. Sending is refused if the layout does not output `$content` and `$unsubscribeUrl`.
 
 ### Content blocks
 
@@ -430,6 +451,7 @@ Authorization uses your `Campaign` / `Subscription` / `Suppression` policies whe
 | What | Where |
 | --- | --- |
 | Routes: prefix, domain, middleware, throttle | `routes.*` (or disable and register your own) |
+| Spam protection for signups only | `routes.signup_middleware` |
 | Authorization ability | `authorization.ability` |
 | Queue connection, queue name, chunk size, tries, backoff | `queue.*` |
 | Rate limits | `rate_limit.*` |
@@ -439,7 +461,9 @@ Authorization uses your `Campaign` / `Subscription` / `Suppression` policies whe
 | Texts and translations | `--tag=newsletter-translations` |
 | Table prefix | `table_prefix` |
 
-Layouts receive `$content`, `$subject`, `$previewText`, `$branding`, `$unsubscribeUrl`, `$preferencesUrl`, `$recipient` and `$data`. The rendered HTML and text must include `$unsubscribeUrl`; the package refuses to send otherwise (`content.require_unsubscribe_link`).
+Layouts receive `$content`, `$subject`, `$previewText`, `$branding`, `$unsubscribeUrl`, `$preferencesUrl`, `$recipient` (`email`, `name`, `firstName()`, `locale`, `key`) and `$data`. The rendered HTML and text must include `$content` and `$unsubscribeUrl` (`content.require_unsubscribe_link`).
+
+Because the layout is rendered once per locale and frozen, **print per-recipient values unchanged**. `{{ $recipient->name }}` works; `{{ Str::upper($subject) }}` or `@if($recipient->name)` do not, and the first is refused when sending starts. Put conditional personal text in the content with `{{ name|fallback }}` instead. Everything else (`$branding`, `$data`, translations, `config()`) can be used freely.
 
 ## Events
 

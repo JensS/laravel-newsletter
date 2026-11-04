@@ -194,7 +194,7 @@ class SubscriptionTest extends TestCase
             ['email' => 'OLD@example.test'],
         ]);
 
-        $this->assertSame(['imported' => 1, 'skipped' => 2], $result);
+        $this->assertSame(['imported' => 1, 'updated' => 0, 'skipped' => 2], $result);
         $sub = Subscription::query()->sole();
         $this->assertSame('2021-03-04 05:06:07', $sub->consent_at->format('Y-m-d H:i:s'));
         $this->assertSame('legacy-form', $sub->source);

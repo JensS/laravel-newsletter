@@ -20,7 +20,10 @@ Route::group([
     // Browser routes (session + CSRF).
     Route::middleware($config['middleware'] ?? ['web'])->group(function () use ($config) {
         Route::post('subscribe', SubscribeController::class)
-            ->middleware('throttle:'.($config['signup_throttle'] ?? '6,1'))
+            ->middleware(array_merge(
+                ['throttle:'.($config['signup_throttle'] ?? '6,1')],
+                (array) ($config['signup_middleware'] ?? []),
+            ))
             ->name('subscribe');
 
         Route::get('confirm/{token}', [ConfirmController::class, 'show'])->name('confirm');

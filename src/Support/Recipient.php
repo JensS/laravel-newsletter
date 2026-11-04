@@ -24,12 +24,17 @@ final class Recipient
         public readonly array $attributes = [],
         public readonly ?Model $subscribable = null,
         public readonly ?int $subscriptionId = null,
+        private readonly ?string $firstNameOverride = null,
     ) {
         $this->email = Email::normalize($email);
     }
 
     public function firstName(): ?string
     {
+        if ($this->firstNameOverride !== null) {
+            return $this->firstNameOverride;
+        }
+
         if ($this->name === null || trim($this->name) === '') {
             return null;
         }
