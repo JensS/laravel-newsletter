@@ -23,6 +23,7 @@ class NewsletterServiceProvider extends ServiceProvider
         $this->app->singleton(BlockRegistry::class);
         $this->app->singleton(SuppressionList::class);
         $this->app->singleton(Newsletter::class);
+        $this->app->singleton(Sending\CircuitBreaker::class);
 
         $this->app->bind(DeliveryDriver::class, function ($app) {
             $driver = config('newsletter.mail.driver', 'mailer');
@@ -57,6 +58,7 @@ class NewsletterServiceProvider extends ServiceProvider
                 Console\PruneCommand::class,
                 Console\DoctorCommand::class,
                 Console\ImportCommand::class,
+                Console\ProcessMailboxCommand::class,
             ]);
         }
 

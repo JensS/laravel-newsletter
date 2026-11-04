@@ -7,6 +7,7 @@ use JensS\Newsletter\Enums\CampaignStatus;
 use JensS\Newsletter\Enums\DeliveryStatus;
 use JensS\Newsletter\Events\DeliveryFailed;
 use JensS\Newsletter\Jobs\PrepareCampaignDeliveries;
+use JensS\Newsletter\Mailbox\MailboxProcessor;
 use JensS\Newsletter\Models\Campaign;
 use JensS\Newsletter\Models\Delivery;
 
@@ -19,9 +20,10 @@ final class Maintenance
     public function __construct(
         private readonly CampaignDispatcher $dispatcher,
         private readonly DeliveryDriver $driver,
+        private readonly MailboxProcessor $mailbox,
     ) {}
 
-    /** @return array{started: int, preparation_resumed: int, interrupted_requeued: int, interrupted_failed: int, redispatched: int, completed: int} */
+    /** @return array{started: int, preparation_resumed: int, interrupted_requeued: int, interrupted_failed: int, redispatched: int, completed: int, mailbox_messages: int} */
     public function run(): array
     {
         return [
@@ -30,6 +32,7 @@ final class Maintenance
         ] + $this->recoverInterruptedDeliveries() + [
             'redispatched' => $this->redispatchLostJobs(),
             'completed' => $this->completeFinishedCampaigns(),
+            'mailbox_messages' => (int) ($this->mailbox->runIfDue()['checked'] ?? 0),
         ];
     }
 

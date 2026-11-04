@@ -13,6 +13,8 @@ use JensS\Newsletter\Events\DeliveryStatusChanged;
 use JensS\Newsletter\Events\SendingMessage;
 use JensS\Newsletter\Exceptions\CampaignException;
 use JensS\Newsletter\Exceptions\PermanentDeliveryException;
+use JensS\Newsletter\Exceptions\SendingPaused;
+use JensS\Newsletter\Exceptions\SystemicDeliveryException;
 use JensS\Newsletter\Exceptions\TemporaryDeliveryException;
 use JensS\Newsletter\Models\Delivery;
 use JensS\Newsletter\Support\AudienceRegistry;
@@ -39,10 +41,13 @@ final class DeliverySender
         private readonly SuppressionList $suppressions,
         private readonly DeliveryDriver $driver,
         private readonly CampaignDispatcher $dispatcher,
+        private readonly CircuitBreaker $breaker,
+        private readonly ReputationGuard $guard,
     ) {}
 
     /**
      * @throws TemporaryDeliveryException when the job should be retried later
+     * @throws SendingPaused when the job should be released without counting as a failure
      */
     public function send(int $deliveryId): string
     {
@@ -60,7 +65,16 @@ final class DeliverySender
             return self::OUTCOME_NOOP;
         }
 
-        if ($campaign->status !== CampaignStatus::Sending || ! $this->claim($delivery)) {
+        // Paused campaigns keep their deliveries queued; resuming re-dispatches them.
+        if ($campaign->status !== CampaignStatus::Sending) {
+            return self::OUTCOME_NOOP;
+        }
+
+        if ($wait = $this->breaker->remaining()) {
+            throw new SendingPaused($wait, (string) $this->breaker->reason());
+        }
+
+        if (! $this->claim($delivery)) {
             return self::OUTCOME_NOOP;
         }
 
@@ -149,13 +163,15 @@ final class DeliverySender
             $result = $this->driver->send($message, $delivery);
         } catch (PermanentDeliveryException|CampaignException $e) {
             return $this->fail($delivery, $e);
+        } catch (SystemicDeliveryException $e) {
+            // The server refuses us, not this recipient: pause everything, keep the delivery queued.
+            $this->requeue($delivery, $e);
+            $seconds = $this->breaker->trip($e->getMessage());
+
+            throw new SendingPaused($seconds, $e->getMessage());
         } catch (Throwable $e) {
             // Temporary (or unknown) failure: put the delivery back and let the queue retry with backoff.
-            Delivery::query()->whereKey($delivery->id)->where('status', DeliveryStatus::Sending->value)->update([
-                'status' => DeliveryStatus::Queued->value,
-                'last_error' => mb_substr($e->getMessage(), 0, 2000),
-                'updated_at' => now(),
-            ]);
+            $this->requeue($delivery, $e);
 
             throw $e instanceof TemporaryDeliveryException
                 ? $e
@@ -171,8 +187,18 @@ final class DeliverySender
         ]);
 
         event(new DeliveryAccepted($delivery->refresh()));
+        $this->breaker->recordSuccess();
 
         return self::OUTCOME_SENT;
+    }
+
+    private function requeue(Delivery $delivery, Throwable $e): void
+    {
+        Delivery::query()->whereKey($delivery->id)->where('status', DeliveryStatus::Sending->value)->update([
+            'status' => DeliveryStatus::Queued->value,
+            'last_error' => mb_substr($e->getMessage(), 0, 2000),
+            'updated_at' => now(),
+        ]);
     }
 
     private function skip(Delivery $delivery, string $reason): string
@@ -190,6 +216,7 @@ final class DeliverySender
             'last_error' => mb_substr($e->getMessage(), 0, 2000),
         ]);
         event(new DeliveryFailed($delivery->refresh(), $e));
+        $this->guard->evaluate($delivery->campaign);
 
         return self::OUTCOME_FAILED;
     }

@@ -2,6 +2,7 @@
 
 namespace JensS\Newsletter\Sending;
 
+use Illuminate\Mail\Mailable;
 use JensS\Newsletter\Exceptions\CampaignException;
 use JensS\Newsletter\Mail\CampaignMessage;
 use JensS\Newsletter\Models\Campaign;
@@ -9,6 +10,7 @@ use JensS\Newsletter\Support\CampaignRenderer;
 use JensS\Newsletter\Support\Email;
 use JensS\Newsletter\Support\Recipient;
 use JensS\Newsletter\Support\RenderedMessage;
+use Symfony\Component\Mime\Email as SymfonyEmail;
 
 final class MessageFactory
 {
@@ -38,9 +40,36 @@ final class MessageFactory
             recipientLocale: $recipient->locale,
         );
 
-        return $message
+        $message
             ->withHeader('X-Newsletter-Campaign', $campaign->uuid)
-            ->withHeader('X-Newsletter-Delivery', $deliveryUuid);
+            ->withHeader('X-Newsletter-Delivery', $deliveryUuid)
+            ->withHeader('Feedback-ID', $this->feedbackId($campaign, (string) $snapshot['audience']));
+
+        self::applyReturnPath($message);
+
+        return $message;
+    }
+
+    /**
+     * Envelope sender for bounces. Symfony uses the Return-Path header as
+     * SMTP "MAIL FROM"; the receiving server then rewrites the header.
+     */
+    public static function applyReturnPath(Mailable $message): void
+    {
+        $returnPath = config('newsletter.mail.return_path');
+
+        if (is_string($returnPath) && Email::isValid($returnPath)) {
+            $message->withSymfonyMessage(fn (SymfonyEmail $email) => $email->returnPath($returnPath));
+        }
+    }
+
+    /** Gmail Postmaster Tools feedback loop identifier: campaign:audience:type:sender. */
+    private function feedbackId(Campaign $campaign, string $audience): string
+    {
+        $clean = fn (string $v) => trim((string) preg_replace('/[^A-Za-z0-9._-]+/', '-', $v), '-') ?: 'x';
+        $sender = (string) (config('newsletter.mail.feedback_id_sender') ?: config('app.name') ?: 'laravel');
+
+        return implode(':', [$clean('c'.$campaign->id), $clean($audience), 'newsletter', $clean($sender)]);
     }
 
     private function asTest(RenderedMessage $rendered): RenderedMessage

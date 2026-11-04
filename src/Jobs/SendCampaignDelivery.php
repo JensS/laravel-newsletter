@@ -7,6 +7,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
+use JensS\Newsletter\Exceptions\SendingPaused;
 use JensS\Newsletter\Jobs\Middleware\ThrottleDeliveries;
 use JensS\Newsletter\Sending\DeliverySender;
 use Throwable;
@@ -46,7 +47,12 @@ class SendCampaignDelivery implements ShouldQueue
 
     public function handle(DeliverySender $sender): void
     {
-        $sender->send($this->deliveryId);
+        try {
+            $sender->send($this->deliveryId);
+        } catch (SendingPaused $paused) {
+            // Circuit breaker open: try again later without counting a failure.
+            ThrottleDeliveries::releaseLater($this, $paused->retryAfter);
+        }
     }
 
     public function failed(?Throwable $e): void

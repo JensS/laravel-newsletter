@@ -26,6 +26,10 @@ class SendCommand extends Command
 
         $count = $dispatcher->estimateRecipients($campaign);
 
+        foreach ($dispatcher->inspect($campaign) as $warning) {
+            $this->components->warn($warning);
+        }
+
         if (! $this->option('force') && ! $this->confirm("Send \"{$campaign->subject}\" to about {$count} recipients of [{$campaign->audience}]?")) {
             return self::SUCCESS;
         }

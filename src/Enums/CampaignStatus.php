@@ -7,6 +7,8 @@ enum CampaignStatus: string
     case Draft = 'draft';
     case Scheduled = 'scheduled';
     case Sending = 'sending';
+    /** Sending stopped by the reputation guard or an admin; queued deliveries wait. */
+    case Paused = 'paused';
     case Sent = 'sent';
     case Cancelled = 'cancelled';
 

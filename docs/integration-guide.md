@@ -259,7 +259,7 @@ Email changes are picked up automatically by the trait. Without the trait, call 
 
 ### 5. SMTP now, provider later
 
-Bounces over plain SMTP arrive in a mailbox. Point your bounce processor (or a small script) at the generic webhook to suppress hard bounces, as described in the README section *Generic webhook*. Messages carry `Message-ID: <delivery-uuid@your-domain>` for matching. To move to a provider later, change `NEWSLETTER_MAILER` (any Laravel mailer works) and add that provider's webhook.
+With plain SMTP, bounces arrive in a mailbox. Configure the bounce mailbox (`NEWSLETTER_MAILBOX_*`) and the package reads it over IMAP, suppressing hard bounces and complaints. Follow [docs/netcup.md](netcup.md) for the complete netcup setup: mailbox, `.env`, DNS records, limits and warm-up. To move to a provider later, change `NEWSLETTER_MAILER` (any Laravel mailer works) and add that provider's webhook.
 
 ---
 

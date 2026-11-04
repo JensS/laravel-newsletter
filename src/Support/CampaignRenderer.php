@@ -43,6 +43,10 @@ final class CampaignRenderer
             $blockTexts[] = $rendered->text ?? HtmlToText::convert($rendered->html);
         }
 
+        if (config('newsletter.content.absolute_urls', true)) {
+            $html = ContentInspector::absolutize($html, (string) (config('newsletter.branding.url') ?: config('app.url')));
+        }
+
         $text = $explicitText === null ? null : trim($explicitText."\n\n".implode("\n\n", $blockTexts));
         $from = config('newsletter.mail.from', []);
 
@@ -113,6 +117,7 @@ final class CampaignRenderer
                 unsubscribeUrl: $links['unsubscribe'],
                 oneClickUrl: $links['one_click'],
                 preferencesUrl: $links['preferences'],
+                unsubscribeToken: $links['token'],
             );
         });
     }
@@ -123,11 +128,11 @@ final class CampaignRenderer
         return new Recipient('preview', $email ?? 'preview@example.com', $name ?? 'Alex Example');
     }
 
-    /** @return array{unsubscribe: ?string, one_click: ?string, preferences: ?string} */
+    /** @return array{unsubscribe: ?string, one_click: ?string, preferences: ?string, token: ?string} */
     public function links(string $audience, string $email, ?string $deliveryUuid = null): array
     {
         if (! Route::has('newsletter.unsubscribe')) {
-            return ['unsubscribe' => null, 'one_click' => null, 'preferences' => null];
+            return ['unsubscribe' => null, 'one_click' => null, 'preferences' => null, 'token' => null];
         }
 
         $token = LinkToken::unsubscribe($audience, $email, $deliveryUuid);
@@ -136,6 +141,7 @@ final class CampaignRenderer
             'unsubscribe' => route('newsletter.unsubscribe', ['token' => $token]),
             'one_click' => route('newsletter.unsubscribe.one-click', ['token' => $token]),
             'preferences' => route('newsletter.preferences', ['token' => LinkToken::preferences($email)]),
+            'token' => $token,
         ];
     }
 

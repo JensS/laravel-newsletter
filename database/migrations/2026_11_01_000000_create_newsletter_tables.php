@@ -39,7 +39,7 @@ return new class extends Migration
             $table->uuid('uuid')->unique();
             $table->string('name');
             $table->string('audience', 64);
-            $table->string('status', 20)->index(); // draft, scheduled, sending, sent, cancelled
+            $table->string('status', 20)->index(); // draft, scheduled, sending, paused, sent, cancelled
             $table->string('subject');
             $table->string('preview_text')->nullable();
             $table->longText('content_html')->nullable();
@@ -58,6 +58,8 @@ return new class extends Migration
             $table->timestamp('prepare_heartbeat_at')->nullable();
             $table->timestamp('finished_at')->nullable();
             $table->timestamp('cancelled_at')->nullable();
+            $table->timestamp('paused_at')->nullable();
+            $table->string('pause_reason')->nullable();
             $table->unsignedInteger('recipient_count')->default(0);
             $table->nullableMorphs('created_by');
             $table->timestamps();

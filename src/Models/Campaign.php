@@ -36,6 +36,8 @@ use JensS\Newsletter\Support\CampaignProgress;
  * @property \Illuminate\Support\Carbon|null $prepare_heartbeat_at
  * @property \Illuminate\Support\Carbon|null $finished_at
  * @property \Illuminate\Support\Carbon|null $cancelled_at
+ * @property \Illuminate\Support\Carbon|null $paused_at
+ * @property string|null $pause_reason
  * @property int $recipient_count
  */
 class Campaign extends Model
@@ -69,6 +71,7 @@ class Campaign extends Model
             'prepare_heartbeat_at' => 'datetime',
             'finished_at' => 'datetime',
             'cancelled_at' => 'datetime',
+            'paused_at' => 'datetime',
         ];
     }
 

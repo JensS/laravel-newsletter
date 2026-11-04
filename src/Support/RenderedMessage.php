@@ -11,5 +11,6 @@ final class RenderedMessage
         public readonly ?string $unsubscribeUrl,
         public readonly ?string $oneClickUrl,
         public readonly ?string $preferencesUrl,
+        public readonly ?string $unsubscribeToken = null,
     ) {}
 }

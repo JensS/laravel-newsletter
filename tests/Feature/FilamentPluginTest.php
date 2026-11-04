@@ -110,6 +110,29 @@ class FilamentPluginTest extends TestCase
         $this->assertSame(CampaignStatus::Cancelled, $campaign->fresh()->status);
     }
 
+    public function test_pause_and_resume(): void
+    {
+        Newsletter::subscribe('newsletter', 'p@example.test', ['confirmed' => true]);
+        $campaign = $this->campaign();
+        Newsletter::send($campaign);
+        $this->actingAs($this->admin);
+
+        Livewire::test(EditCampaign::class, ['record' => $campaign->getRouteKey()])
+            ->assertActionHidden('resume')
+            ->callAction('pause')
+            ->assertNotified('Campaign paused');
+
+        $this->assertSame(CampaignStatus::Paused, $campaign->fresh()->status);
+
+        Livewire::test(EditCampaign::class, ['record' => $campaign->getRouteKey()])
+            ->assertSee('Paused by')
+            ->callAction('resume')
+            ->assertNotified('Sending resumed');
+
+        $this->work();
+        $this->assertSame(CampaignStatus::Sent, $campaign->fresh()->status);
+    }
+
     public function test_list_pages_render(): void
     {
         $this->actingAs($this->admin);

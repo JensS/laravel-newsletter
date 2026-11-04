@@ -121,6 +121,7 @@ class CampaignResource extends Resource
                         CampaignStatus::Draft => 'gray',
                         CampaignStatus::Scheduled => 'info',
                         CampaignStatus::Sending => 'warning',
+                        CampaignStatus::Paused => 'danger',
                         CampaignStatus::Sent => 'success',
                         CampaignStatus::Cancelled => 'danger',
                     }),

@@ -10,6 +10,8 @@ use JensS\Newsletter\Enums\CampaignStatus;
 use JensS\Newsletter\Enums\DeliveryStatus;
 use JensS\Newsletter\Events\CampaignCancelled;
 use JensS\Newsletter\Events\CampaignCompleted;
+use JensS\Newsletter\Events\CampaignPaused;
+use JensS\Newsletter\Events\CampaignResumed;
 use JensS\Newsletter\Events\CampaignPrepared;
 use JensS\Newsletter\Events\CampaignScheduled;
 use JensS\Newsletter\Events\CampaignStarted;
@@ -20,6 +22,7 @@ use JensS\Newsletter\Models\Campaign;
 use JensS\Newsletter\Models\Delivery;
 use JensS\Newsletter\Support\AudienceRegistry;
 use JensS\Newsletter\Support\CampaignRenderer;
+use JensS\Newsletter\Support\ContentInspector;
 use JensS\Newsletter\Support\Email;
 use JensS\Newsletter\Support\Recipient;
 use JensS\Newsletter\Support\SuppressionList;
@@ -209,6 +212,68 @@ final class CampaignDispatcher
         return $cancelled;
     }
 
+    /** Stop sending; queued deliveries wait until resume(). */
+    public function pause(Campaign $campaign, string $reason = 'Paused manually'): bool
+    {
+        $won = Campaign::query()
+            ->whereKey($campaign->id)
+            ->where('status', CampaignStatus::Sending->value)
+            ->update([
+                'status' => CampaignStatus::Paused->value,
+                'paused_at' => now(),
+                'pause_reason' => mb_substr($reason, 0, 255),
+                'updated_at' => now(),
+            ]);
+
+        if ($won) {
+            event(new CampaignPaused($campaign->refresh(), $reason));
+        }
+
+        return (bool) $won;
+    }
+
+    /** Continue a paused campaign: re-queues everything that is still waiting. */
+    public function resume(Campaign $campaign): int
+    {
+        $won = Campaign::query()
+            ->whereKey($campaign->id)
+            ->where('status', CampaignStatus::Paused->value)
+            ->update([
+                'status' => CampaignStatus::Sending->value,
+                'paused_at' => null,
+                'pause_reason' => null,
+                'prepare_heartbeat_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+        if (! $won) {
+            throw new CampaignException('Only paused campaigns can be resumed.');
+        }
+
+        $campaign->refresh();
+
+        if ($campaign->prepared_at === null) {
+            PrepareCampaignDeliveries::dispatch($campaign->id);
+        }
+
+        $requeued = 0;
+        Delivery::query()
+            ->where('campaign_id', $campaign->id)
+            ->where('status', DeliveryStatus::Queued->value)
+            ->orderBy('id')
+            ->pluck('id')
+            ->each(function ($id) use (&$requeued) {
+                if ($this->dispatchDelivery((int) $id, force: true)) {
+                    $requeued++;
+                }
+            });
+
+        event(new CampaignResumed($campaign));
+        $this->completeIfFinished($campaign);
+
+        return $requeued;
+    }
+
     /**
      * Send the current (unfrozen) content to test addresses, synchronously.
      *
@@ -240,6 +305,24 @@ final class CampaignDispatcher
         $snapshot = $campaign->snapshot ?? $this->renderer->snapshot($campaign);
 
         return $this->renderer->render($snapshot, $recipient ?? $this->renderer->sampleRecipient())->html;
+    }
+
+    /**
+     * Deliverability warnings for the current content (never blocking).
+     *
+     * @return list<string>
+     */
+    public function inspect(Campaign $campaign): array
+    {
+        $snapshot = $campaign->snapshot ?? $this->renderer->snapshot($campaign);
+
+        try {
+            $rendered = $this->renderer->render($snapshot, $this->renderer->sampleRecipient())->html;
+        } catch (\Throwable) {
+            $rendered = null;
+        }
+
+        return ContentInspector::inspect($snapshot, $rendered);
     }
 
     public function estimateRecipients(Campaign $campaign): int

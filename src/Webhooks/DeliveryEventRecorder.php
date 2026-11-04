@@ -7,6 +7,7 @@ use JensS\Newsletter\Events\DeliveryStatusChanged;
 use JensS\Newsletter\Models\Delivery;
 use JensS\Newsletter\Models\Suppression;
 use JensS\Newsletter\Models\WebhookEvent;
+use JensS\Newsletter\Sending\ReputationGuard;
 use JensS\Newsletter\Support\Email;
 use JensS\Newsletter\Support\SuppressionList;
 
@@ -33,7 +34,10 @@ final class DeliveryEventRecorder
         'failed' => 3, 'suppressed' => 3, 'bounced' => 4, 'complained' => 5,
     ];
 
-    public function __construct(private readonly SuppressionList $suppressions) {}
+    public function __construct(
+        private readonly SuppressionList $suppressions,
+        private readonly ReputationGuard $guard,
+    ) {}
 
     /**
      * Returns false when the event was already processed (replay or provider retry).
@@ -151,6 +155,10 @@ final class DeliveryEventRecorder
 
         if ($updated) {
             event(new DeliveryStatusChanged($delivery->refresh(), $from, $to));
+
+            if (in_array($to, [DeliveryStatus::Bounced, DeliveryStatus::Complained], true)) {
+                $this->guard->evaluate($delivery->campaign);
+            }
         }
     }
 

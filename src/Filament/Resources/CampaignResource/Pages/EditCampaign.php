@@ -7,12 +7,14 @@ use Filament\Forms;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\HtmlString;
 use JensS\Newsletter\Enums\CampaignStatus;
 use JensS\Newsletter\Exceptions\CampaignException;
 use JensS\Newsletter\Filament\Resources\CampaignResource;
 use JensS\Newsletter\Filament\Resources\CampaignResource\Widgets\CampaignProgress;
 use JensS\Newsletter\Models\Campaign;
 use JensS\Newsletter\Sending\CampaignDispatcher;
+use JensS\Newsletter\Sending\CircuitBreaker;
 use Throwable;
 
 /**
@@ -31,7 +33,9 @@ class EditCampaign extends EditRecord
     {
         return match ($this->record->status) {
             CampaignStatus::Scheduled => 'Scheduled for '.$this->record->scheduled_at?->timezone(config('app.timezone'))->format('Y-m-d H:i'),
-            CampaignStatus::Sending => 'Sending since '.$this->record->started_at?->diffForHumans(),
+            CampaignStatus::Sending => 'Sending since '.$this->record->started_at?->diffForHumans()
+                .(($reason = app(CircuitBreaker::class)->reason()) ? ' · Mail server paused sending: '.$reason : ''),
+            CampaignStatus::Paused => 'Paused: '.$this->record->pause_reason,
             CampaignStatus::Sent => 'Sent '.$this->record->finished_at?->diffForHumans(),
             CampaignStatus::Cancelled => 'Cancelled '.$this->record->cancelled_at?->diffForHumans(),
             default => 'Draft',
@@ -126,19 +130,42 @@ class EditCampaign extends EditRecord
                 ->modalHeading('Send this campaign now?')
                 ->modalDescription(function () use ($dispatcher) {
                     $count = rescue(fn () => $dispatcher()->estimateRecipients($this->record), 0, false);
+                    $warnings = rescue(fn () => $dispatcher()->inspect($this->previewRecord()), [], false);
+                    $text = e("It will be sent to about {$count} recipients. The content is frozen as soon as sending starts.");
 
-                    return "It will be sent to about {$count} recipients. The content is frozen as soon as sending starts.";
+                    if ($warnings !== []) {
+                        $text .= '<br><br><strong>Deliverability warnings</strong><ul style="list-style:disc;padding-left:1.25rem;text-align:left">'
+                            .implode('', array_map(fn ($w) => '<li>'.e($w).'</li>', $warnings)).'</ul>';
+                    }
+
+                    return new HtmlString($text);
                 })
                 ->action(function () use ($dispatcher) {
                     $this->save(shouldRedirect: false, shouldSendSavedNotification: false);
                     $this->guard(fn () => $dispatcher()->start($this->record->refresh()), 'Sending started');
                 }),
 
+            Actions\Action::make('pause')
+                ->icon('heroicon-o-pause')
+                ->color('warning')
+                ->visible(fn () => $this->record->status === CampaignStatus::Sending)
+                ->requiresConfirmation()
+                ->modalDescription('Queued deliveries wait until you resume. Messages already handed to the mail server are not affected.')
+                ->action(fn () => $this->guard(fn () => $dispatcher()->pause($this->record, 'Paused by '.(auth()->user()?->name ?? 'admin')), 'Campaign paused')),
+
+            Actions\Action::make('resume')
+                ->icon('heroicon-o-play')
+                ->color('success')
+                ->visible(fn () => $this->record->status === CampaignStatus::Paused)
+                ->requiresConfirmation()
+                ->modalDescription(fn () => 'Paused because: '.$this->record->pause_reason.'. Check the delivery list (bounces, complaints) and the suppression list before resuming.')
+                ->action(fn () => $this->guard(fn () => $dispatcher()->resume($this->record), 'Sending resumed')),
+
             Actions\Action::make('cancelCampaign')
-                ->label(fn () => $this->record->status === CampaignStatus::Sending ? 'Cancel remaining' : 'Cancel')
+                ->label(fn () => in_array($this->record->status, [CampaignStatus::Sending, CampaignStatus::Paused], true) ? 'Cancel remaining' : 'Cancel')
                 ->icon('heroicon-o-x-circle')
                 ->color('danger')
-                ->visible(fn () => in_array($this->record->status, [CampaignStatus::Scheduled, CampaignStatus::Sending], true))
+                ->visible(fn () => in_array($this->record->status, [CampaignStatus::Scheduled, CampaignStatus::Sending, CampaignStatus::Paused], true))
                 ->requiresConfirmation()
                 ->modalDescription('Deliveries already handed to the mail provider cannot be recalled. Everything still queued is cancelled.')
                 ->action(fn () => $this->guard(fn () => $dispatcher()->cancel($this->record), 'Campaign cancelled')),

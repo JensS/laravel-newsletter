@@ -89,6 +89,11 @@ return [
         'reply_to' => env('NEWSLETTER_REPLY_TO'),
         'unsubscribe_mailto' => env('NEWSLETTER_UNSUBSCRIBE_MAILTO'), // optional mailto: for List-Unsubscribe
         'message_id_domain' => env('NEWSLETTER_MESSAGE_ID_DOMAIN'), // defaults to the from-address domain
+        // Envelope sender (Return-Path): where bounces go when sending via SMTP.
+        // On shared hosts this usually has to be the authenticated mailbox itself.
+        'return_path' => env('NEWSLETTER_RETURN_PATH'),
+        // Feedback-ID header for Gmail Postmaster Tools (campaign:audience:newsletter:<sender id>).
+        'feedback_id_sender' => env('NEWSLETTER_FEEDBACK_ID', env('APP_NAME')),
     ],
 
     'queue' => [
@@ -101,10 +106,59 @@ return [
         'stale_after_minutes' => 30, // a "sending" delivery older than this is considered interrupted
     ],
 
+    /*
+    | Sending limits. Shared-hosting SMTP servers (e.g. netcup) enforce limits
+    | they rarely publish; stay well below them. Exceeding them typically gets
+    | the mailbox or the whole hosting account blocked.
+    */
     'rate_limit' => [
         'per_second' => env('NEWSLETTER_RATE_PER_SECOND', 2),
         'per_minute' => env('NEWSLETTER_RATE_PER_MINUTE', 100),
         'per_hour' => env('NEWSLETTER_RATE_PER_HOUR'),
+        'per_day' => env('NEWSLETTER_RATE_PER_DAY'),
+        // Big mailbox providers (Gmail, GMX/web.de, T-Online, Outlook) slow down or
+        // defer unknown senders who send bursts to them. null = no per-domain limit.
+        'per_domain_per_minute' => env('NEWSLETTER_RATE_PER_DOMAIN_PER_MINUTE'),
+    ],
+
+    /*
+    | Circuit breaker: when the mail server signals a problem that affects every
+    | message (authentication failure, quota or rate limit exceeded, connection
+    | refused), all sending pauses instead of burning through the recipient list.
+    */
+    'circuit_breaker' => [
+        'enabled' => true,
+        'pause_minutes' => [5, 15, 60, 240], // escalating pauses while the problem persists
+    ],
+
+    /*
+    | Reputation guard: a campaign pauses itself when too many of its messages
+    | bounce or are reported as spam. Resume it manually after checking the list.
+    */
+    'guard' => [
+        'enabled' => true,
+        'min_sample' => 50,          // evaluate after this many handed-off messages
+        'max_bounce_rate' => 0.05,   // 5 % hard bounces
+        'max_complaint_rate' => 0.003, // 0.3 % complaints (Gmail's hard limit)
+    ],
+
+    /*
+    | Bounce mailbox (IMAP). With plain SMTP, bounces, spam reports and mailto
+    | unsubscribes arrive as emails. `newsletter:process-mailbox` reads them,
+    | updates deliveries and suppresses addresses. Pure PHP; no ext-imap needed.
+    */
+    'mailbox' => [
+        'enabled' => env('NEWSLETTER_MAILBOX_HOST') !== null,
+        'host' => env('NEWSLETTER_MAILBOX_HOST'),
+        'port' => (int) env('NEWSLETTER_MAILBOX_PORT', 993),
+        'encryption' => env('NEWSLETTER_MAILBOX_ENCRYPTION', 'ssl'), // ssl, tls (STARTTLS) or none
+        'username' => env('NEWSLETTER_MAILBOX_USERNAME'),
+        'password' => env('NEWSLETTER_MAILBOX_PASSWORD'),
+        'folder' => env('NEWSLETTER_MAILBOX_FOLDER', 'INBOX'),
+        'processed_folder' => env('NEWSLETTER_MAILBOX_PROCESSED_FOLDER'), // move handled mails here (null = mark as read)
+        'interval_minutes' => 10,   // how often maintenance checks the mailbox
+        'max_messages' => 200,      // per run
+        'timeout' => 20,
     ],
 
     /*
@@ -176,6 +230,8 @@ return [
             // 'latest-posts' => App\Newsletter\Blocks\LatestPosts::class,
         ],
         'require_unsubscribe_link' => true, // refuse to send a template without the unsubscribe URL
+        'absolute_urls' => true, // turn relative links/images ("/news") into absolute APP_URL links when freezing
+        'max_html_kb' => 95,     // warn above this size: Gmail clips messages larger than ~102 KB
     ],
 
     'branding' => [

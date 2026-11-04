@@ -4,6 +4,7 @@ namespace JensS\Newsletter\Drivers;
 
 use JensS\Newsletter\Contracts\DeliveryDriver;
 use JensS\Newsletter\Exceptions\PermanentDeliveryException;
+use JensS\Newsletter\Exceptions\SystemicDeliveryException;
 use JensS\Newsletter\Exceptions\TemporaryDeliveryException;
 use JensS\Newsletter\Mail\CampaignMessage;
 use JensS\Newsletter\Models\Delivery;
@@ -88,14 +89,20 @@ final class ResendDriver implements DeliveryDriver
         if (str_ends_with($class, 'ErrorException') && method_exists($e, 'getErrorCode')) {
             $status = (int) $e->getErrorCode();
 
-            // 409: concurrent request with the same idempotency key; 429: rate limited.
-            if ($status === 409 || $status === 429 || $status >= 500 || $status === 0) {
+            // Rate limited, bad key or account problem: affects every message.
+            if (in_array($status, [401, 403, 429], true)) {
+                return new SystemicDeliveryException($e->getMessage(), $status, $e);
+            }
+
+            // 409: concurrent request with the same idempotency key.
+            if ($status === 409 || $status >= 500 || $status === 0) {
                 return new TemporaryDeliveryException($e->getMessage(), $status, $e);
             }
 
             return new PermanentDeliveryException($e->getMessage(), $status, $e);
         }
 
-        return new TemporaryDeliveryException($e->getMessage(), (int) $e->getCode(), $e);
+        // Network-level failure talking to the API.
+        return new SystemicDeliveryException($e->getMessage(), (int) $e->getCode(), $e);
     }
 }

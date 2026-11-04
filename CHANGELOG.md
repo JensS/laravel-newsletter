@@ -16,4 +16,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Shared-hosting workers: `newsletter:work` for hourly cron, scheduler integration, authenticated HTTP tick.
 - Account lifecycle hooks: email change, erasure, export, retention pruning.
 - Optional Filament 3 plugin for campaigns, subscribers and the suppression list.
+- Shared-host SMTP safeguards: per-day and per-provider limits, SMTP error classification with a global circuit breaker, a reputation guard that pauses campaigns (`paused` status, pause/resume), Return-Path and Feedback-ID headers, tokenised `mailto:` List-Unsubscribe.
+- Pure-PHP IMAP bounce processing (`newsletter:process-mailbox`): RFC 3464 DSNs, non-standard bounces, ARF complaints, mailto unsubscribes, auto-replies.
+- Content checks (Gmail clipping, http links, shorteners, alt text, subjects) and automatic absolute URLs.
+- netcup guide (`docs/netcup.md`) and netcup-aware `newsletter:doctor` checks (SPF include, DKIM key1/key2, DMARC, reverse DNS, `--smtp`, `--mailbox`).
 - `newsletter:install`, `newsletter:doctor` (including SPF/DKIM/DMARC checks), `newsletter:send`, `newsletter:import`, `newsletter:prune`, `newsletter:maintain`.

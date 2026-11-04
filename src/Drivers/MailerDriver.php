@@ -5,10 +5,12 @@ namespace JensS\Newsletter\Drivers;
 use Illuminate\Contracts\Mail\Factory as MailFactory;
 use JensS\Newsletter\Contracts\DeliveryDriver;
 use JensS\Newsletter\Exceptions\PermanentDeliveryException;
+use JensS\Newsletter\Exceptions\SystemicDeliveryException;
 use JensS\Newsletter\Exceptions\TemporaryDeliveryException;
 use JensS\Newsletter\Mail\CampaignMessage;
 use JensS\Newsletter\Models\Delivery;
 use JensS\Newsletter\Support\SendResult;
+use JensS\Newsletter\Support\SmtpErrorClassifier;
 use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 
 /**
@@ -25,12 +27,11 @@ final class MailerDriver implements DeliveryDriver
         } catch (TransportExceptionInterface $e) {
             $code = (int) $e->getCode();
 
-            // SMTP 5xx replies are permanent (unknown mailbox, policy rejection ...).
-            if ($code >= 500 && $code < 600) {
-                throw new PermanentDeliveryException($e->getMessage(), $code, $e);
-            }
-
-            throw new TemporaryDeliveryException($e->getMessage(), $code, $e);
+            throw match (SmtpErrorClassifier::classify($code, $e->getMessage())) {
+                SmtpErrorClassifier::SYSTEMIC => new SystemicDeliveryException($e->getMessage(), $code, $e),
+                SmtpErrorClassifier::PERMANENT => new PermanentDeliveryException($e->getMessage(), $code, $e),
+                default => new TemporaryDeliveryException($e->getMessage(), $code, $e),
+            };
         }
 
         $providerId = null;

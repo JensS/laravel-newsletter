@@ -18,13 +18,14 @@ It is built for **shared hosting**: it works with the `database` queue, needs no
 - [Campaigns](#campaigns)
 - [Sending on shared hosting](#sending-on-shared-hosting)
 - [Mail providers and webhooks](#mail-providers-and-webhooks)
+- [Sending through your web host's SMTP](#sending-through-your-web-hosts-smtp)
 - [Account lifecycle (GDPR)](#account-lifecycle-gdpr)
 - [Filament admin](#filament-admin)
 - [Customisation](#customisation)
 - [Events](#events)
 - [Going to production](#going-to-production)
 - [Testing](#testing)
-- [Integration guide](docs/integration-guide.md)
+- [Integration guide](docs/integration-guide.md) · [netcup / shared-host SMTP guide](docs/netcup.md)
 
 ## Requirements
 
@@ -368,6 +369,20 @@ Statuses only move forward: a late `delivered` never overwrites `bounced`.
 
 `type` is one of `bounced`, `complained`, `delivered`, `failed`. Identify the message with `delivery` (UUID), `message_id` or just `email`. Set `NEWSLETTER_WEBHOOK_SECRET`. `JensS\Newsletter\Webhooks\GenericSignature::sign()` creates the header.
 
+## Sending through your web host's SMTP
+
+Sending through a shared web host's mail server (netcup, Strato, IONOS, all-inkl …) works, but it has to be gentle. The package includes the safeguards for it:
+
+- **Limits per second, minute, hour and day**, plus a **per-provider limit** (Gmail+Googlemail, GMX+web.de, Outlook+Hotmail … count as one).
+- **Circuit breaker:** SMTP replies are classified as *recipient* problems (`550 5.1.1` → permanent), *temporary* ones (greylisting, mailbox full) or *systemic* ones (auth failure, quota or rate limit, connection refused). Systemic errors pause **all** sending for 5 → 15 → 60 → 240 minutes instead of failing the list, and it resumes on its own.
+- **Reputation guard:** a campaign pauses itself above 5 % bounces or 0.3 % complaints (`guard.*`). Resume it in Filament or with `Newsletter::campaigns()->resume($campaign)`.
+- **IMAP bounce processing** (`newsletter:process-mailbox`, pure PHP): RFC 3464 DSNs, non-standard bounces, ARF complaints and `mailto:` unsubscribes. Rejections caused by *your* reputation (DMARC, blocklists) never suppress the recipient.
+- **Return-Path** (`NEWSLETTER_RETURN_PATH`), **Feedback-ID** for Gmail Postmaster Tools, a tokenised `mailto:` List-Unsubscribe next to the HTTPS one-click link.
+- **Content checks** before sending (Gmail's ~102 KB clipping, http links, URL shorteners, missing alt text, image-only mails, shouting subjects), and relative URLs are made absolute.
+- **`newsletter:doctor --smtp --mailbox`** checks SPF (single record, provider include), DKIM, DMARC, forward-confirmed reverse DNS, TLS port, From/mailbox alignment, and logs in to SMTP and IMAP.
+
+**Step-by-step setup for netcup, including DNS records and `.env`: [docs/netcup.md](docs/netcup.md).**
+
 ## Account lifecycle (GDPR)
 
 With the `HasNewsletterSubscriptions` trait, email changes move subscriptions automatically, and hard-deleting a member erases their newsletter data. Soft-deleted members are excluded at send time. To call these explicitly, for example from an account controller:
@@ -435,6 +450,7 @@ Layouts receive `$content`, `$subject`, `$previewText`, `$branding`, `$unsubscri
 | `Unsubscribed` | withdrawal from an audience (with source: `link`, `one-click`, `preferences`, `admin`, …) |
 | `AddressSuppressed` | address added to the suppression list |
 | `CampaignScheduled`, `CampaignStarted`, `CampaignPrepared`, `CampaignCompleted`, `CampaignCancelled` | campaign lifecycle |
+| `CampaignPaused`, `CampaignResumed` | reputation guard or admin paused / resumed a campaign (with reason) |
 | `SendingMessage` | just before a message is handed to the driver (add headers here) |
 | `DeliveryAccepted`, `DeliveryFailed`, `DeliverySkipped`, `DeliveryStatusChanged` | delivery lifecycle, including webhooks |
 | `MemberForgotten` | newsletter data erased |
@@ -443,13 +459,14 @@ All events live in `JensS\Newsletter\Events`.
 
 ## Going to production
 
-Run `php artisan newsletter:doctor --dkim-selector=resend` (use your provider's selector). It checks:
+Run `php artisan newsletter:doctor --smtp` (add `--dkim-selector=resend` or your provider's selector; netcup's `key1`/`key2` are checked automatically). It checks:
 
 - tables and an asynchronous queue (with its `jobs` table);
 - a real mail transport, sender address and footer postal address;
 - unsubscribe routes and an `https` `APP_URL`;
 - a webhook secret when using Resend;
-- **SPF, DKIM and DMARC** DNS records for the sending domain.
+- **SPF, DKIM and DMARC** DNS records for the sending domain;
+- for SMTP: TLS port, authentication, From/mailbox alignment, bounce mailbox, limits and reverse DNS of the mail server.
 
 Bulk-sender requirements of the large mailbox providers (Google, Yahoo, Microsoft): authenticate the sending domain with SPF **and** DKIM, publish DMARC, align the From domain, keep spam complaints low, and offer one-click unsubscribe. This package handles unsubscribe, headers and suppression. The DNS side is up to you. See [Google's email sender guidelines](https://support.google.com/a/answer/81126).
 

@@ -16,6 +16,7 @@ use JensS\Newsletter\Events\SubscriptionRequested;
 use JensS\Newsletter\Events\Unsubscribed;
 use JensS\Newsletter\Mail\ConfirmSubscription;
 use JensS\Newsletter\Models\Subscription;
+use JensS\Newsletter\Sending\MessageFactory;
 use JensS\Newsletter\Recipients\ConfiguredMemberResolver;
 use JensS\Newsletter\Support\Audience;
 use JensS\Newsletter\Support\AudienceRegistry;
@@ -456,6 +457,8 @@ final class SubscriptionManager
             route('newsletter.confirm', ['token' => $token]),
             $audience->label(),
         );
+
+        MessageFactory::applyReturnPath($mailable);
 
         $mailer = $this->mail->mailer(config('newsletter.mail.mailer'));
         $pending = $mailer->to($subscription->email, $subscription->name);

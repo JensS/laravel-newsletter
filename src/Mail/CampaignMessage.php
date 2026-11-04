@@ -83,8 +83,11 @@ class CampaignMessage extends Mailable
             $targets[] = '<'.$this->rendered->oneClickUrl.'>';
         }
 
+        // The mailto variant carries the signed token in the subject, so the
+        // mailbox processor can unsubscribe the right address (newsletter:process-mailbox).
         if ($mailto = config('newsletter.mail.unsubscribe_mailto')) {
-            $targets[] = '<mailto:'.$mailto.'?subject=unsubscribe>';
+            $subject = $this->rendered->unsubscribeToken ? 'unsubscribe '.$this->rendered->unsubscribeToken : 'unsubscribe';
+            $targets[] = '<mailto:'.$mailto.'?subject='.rawurlencode($subject).'>';
         }
 
         if ($targets !== []) {
