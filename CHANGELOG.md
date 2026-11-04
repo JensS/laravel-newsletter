@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-04
+
+First stable release.
+
 ### Added
 
 - Audiences backed by package subscriptions (with optional member linking) or application recipient providers.
@@ -24,3 +28,6 @@ All notable changes to this project are documented here. The format follows [Kee
 - Content checks (Gmail clipping, http links, shorteners, alt text, subjects) and automatic absolute URLs.
 - netcup guide (`docs/netcup.md`) and netcup-aware `newsletter:doctor` checks (SPF include, DKIM key1/key2, DMARC, reverse DNS, `--smtp`, `--mailbox`).
 - `newsletter:install`, `newsletter:doctor` (including SPF/DKIM/DMARC checks), `newsletter:send`, `newsletter:import`, `newsletter:prune`, `newsletter:maintain`.
+
+[Unreleased]: https://github.com/JensS/laravel-newsletter/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/JensS/laravel-newsletter/releases/tag/v1.0.0
